@@ -24,8 +24,26 @@ transform = transforms.Compose([
     transforms.Normalize((0.1307,), (0.3081,))
 ])
 
-def validate(model, data_loader, criterion, device):
+def measure_model_runtime(verbose = True):
+    def decorator(function):
+        def wrapper(*args, **kwargs):
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+                with record_function("model_inference"):
+                    test_loss, test_acc = function(*args, **kwargs)
+            
+            if verbose:
+                print('loss: ', test_loss)
+                print('accuracy: ', test_acc)
+                print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+            
+            return test_loss, test_acc
+        return wrapper
+    return decorator
 
+@measure_model_runtime(verbose=config['verbose'])
+def validate(model, data_loader, criterion):
+
+    print('validating...')
     model.eval()
     valid_running_loss = 0.0
     valid_running_correct = 0
@@ -36,8 +54,8 @@ def validate(model, data_loader, criterion, device):
             counter += 1
             
             features, labels = data
-            features = features.to(device)
-            labels = labels.to(device)
+            features = features.to(config['device'])
+            labels = labels.to(config['device'])
             outputs = model(features)
             loss = criterion(outputs, labels)
             valid_running_loss += loss.item()
@@ -58,7 +76,7 @@ def validate(model, data_loader, criterion, device):
 def prune_model(model, test_loader):
     
     print('Before Pruning:')
-    measure_model_running_time(model, test_loader)
+    validate(model, test_loader, nn.CrossEntropyLoss())
 
     # 1. setup strategy (L1 Norm)
     strategy = tp.strategy.L1Strategy() # or tp.strategy.RandomStrategy()
@@ -73,31 +91,24 @@ def prune_model(model, test_loader):
     pruning_idxs = strategy(model.features[0].weight, amount=0.5) 
     # pruning_idxs=[1, 3, 5]
     pruning_plan = DG.get_pruning_plan( model.features[0], tp.prune_conv_out_channel, idxs=pruning_idxs)
-    print(pruning_plan)
+    
+    if config['verbose']:
+        print(pruning_plan)
 
     # 4. execute this plan after checking (prune the model)
     #    if the plan prunes some channels to zero, 
     #    DG.check_pruning plan will return False.
     if DG.check_pruning_plan(pruning_plan):
+        print('pruning...')
         pruning_plan.exec()
 
     print('After Pruning:')
-    measure_model_running_time(model, test_loader)
+    loss, acc = validate(model, test_loader, nn.CrossEntropyLoss())
+
+    # TODO: Use the after loss/acc as part of fitness score
+    # i.e. fitness score = -(acc + # of pruned neurals)  <== need to be scaled(standardized) !!  
 
     return model
-
-
-def measure_model_running_time(model, test_loader):
-
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-        with record_function("model_inference"):
-            test_loss, test_acc = validate(
-                model, test_loader, nn.CrossEntropyLoss(), config['device']
-            )
-    
-    print('loss: ', test_loss)
-    print('accuracy: ', test_acc)
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 def main():
 
