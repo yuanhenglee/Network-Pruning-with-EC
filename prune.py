@@ -8,7 +8,7 @@ import torch.nn.utils.prune as prune
 import torch_pruning as tp
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torchvision.models import VGG
 from tqdm import tqdm
 
@@ -33,6 +33,13 @@ class ModelPruner():
         return {'loss': loss, 'acc': acc}
 
     def prune_model(self, prune_amount_list: list) -> VGG:
+
+        assert(
+            len(prune_amount_list) == 10
+        ), 'The total number of prunable layer is 10.'
+        assert(
+            all(prune_amount>=0 and prune_amount<1  for prune_amount in prune_amount_list)
+        ), 'the prune amount should be in the range of [0,1.0)'
 
         if self.pruning_method == 'by_parameter':
             return self._prune_model_by_parameter(prune_amount_list)
@@ -61,13 +68,6 @@ class ModelPruner():
     def _prune_model_by_parameter(self, prune_amount_list: list) -> VGG:
         
         model = copy.deepcopy(self.model)
-
-        assert(
-            len(prune_amount_list) == 10
-        ), 'The total number of prunable layer is 10.'
-        assert(
-            all(prune_amount>=0 and prune_amount<1  for prune_amount in prune_amount_list)
-        ), 'the prune amount should be in the range of [0,1.0)'
 
         print('pruning...')
 
@@ -119,10 +119,14 @@ class ModelPruner():
         valid_running_correct = 0
         counter = 0
         criterion = nn.CrossEntropyLoss()
+        times = 0
+        progress = tqdm(total=10 if self.config['reduction'] else len(self.test_loader))
+
 
         with torch.no_grad():
-            for data in tqdm(self.test_loader):
-                counter += 1
+            for data in self.test_loader:
+                if self.config['reduction'] and counter==10:
+                    break
                 
                 features, labels = data
                 features = features.to(self.config['device'])
@@ -134,11 +138,14 @@ class ModelPruner():
                 # Calculate the accuracy.
                 _, preds = torch.max(outputs.data, 1)
                 valid_running_correct += (preds == labels).sum().item()
+                
+                counter += 1
+                progress.update(1)
 
         # Loss and accuracy for the complete epoch.
         epoch_loss = valid_running_loss / counter
         epoch_acc = (
-            100. * (valid_running_correct / len(self.test_loader.dataset))
+            100. * (valid_running_correct / self.config['batch_size'] / counter)
         )
 
         return epoch_loss, epoch_acc
@@ -151,7 +158,7 @@ class ModelPruner():
         model.classifier[6] = nn.Linear(in_features=4096, out_features=10)
         model_path = f"{self.config['model_weights_root_path']}vgg11_{self.config['dataset']}.pt"
         print(f'Load model: {model_path}...')
-        model.load_state_dict(torch.load(model_path))
+        model.load_state_dict(torch.load(model_path, map_location=torch.device(self.config['device'])))
         model = model.to(self.config['device'])
         return model
 
@@ -185,4 +192,4 @@ class ModelPruner():
                     os.makedirs(self.config['dataset_root_path'])
                 test_data = torchvision.datasets.MNIST(root = self.config['dataset_root_path'], train=False, transform=transform, download=True)
 
-        return DataLoader(dataset=test_data, batch_size=self.config['batch_size'], shuffle=False, num_workers = 1)
+        return DataLoader(dataset=test_data, batch_size=self.config['batch_size'], shuffle=True, num_workers = 1)
