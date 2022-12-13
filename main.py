@@ -34,22 +34,22 @@ if __name__ == '__main__':
     mp = ModelPruner(model_name, dataset, pruning_method)
 
     problem = PruningProblem(mp)
-    print(mp.baseline)
+    print('baseline:', mp.baseline)
     algorithm = CMAES(x0=np.random.random(problem.n_var))
     res = minimize(problem,
                    algorithm,                
                    ('n_iter', es_n_iter),
                    seed=1,
-                   verbose=False)
+                   verbose=True)
 
     print(f"Best solution found: \nX = {res.X}\nF = {res.F}\nCV= {res.CV}")
-    print(mp.get_fitness_score())
+    print(mp.get_fitness_score(verbose=True))
 
     pruned_model_saving_path = f"{mp.config['model_weights_root_path']}pruned/pruned_{model_name}_{dataset}.model"
     torch.save(mp.cached_model, pruned_model_saving_path)
     
     # Load pruned model
-
+    # pruned_model_saving_path = f"{mp.config['model_weights_root_path']}pruned/pruned_{model_name}_{dataset}.model"
     # model = torch.load(pruned_model_saving_path, map_location=torch.device(device))
     # model = model.to(device)
     # print(mp.get_fitness_score(model))

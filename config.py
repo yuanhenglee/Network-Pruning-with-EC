@@ -5,11 +5,11 @@ config_cifar10 = {
     'device': 'cuda',
     'n_epochs': 2,
     'lr': 0.002,
-    'verbose': True,
+    'verbose': False,
     'batch_size': 64,
     'random_seed': 42,
     'image_size': 64,
-    'loss_alpha': 1,
+    'loss_alpha': 0.5,
     'reduction': True
 }
 
@@ -20,10 +20,10 @@ config_mnist = {
     'device': 'cuda',
     'n_epochs': 2,
     'lr': 0.002,
-    'verbose': True,
+    'verbose': False,
     'batch_size': 64,
     'random_seed': 42,
     'image_size': 64,
-    'loss_alpha': 1,
+    'loss_alpha': 0.5,
     'reduction': True
 }

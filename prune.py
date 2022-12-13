@@ -48,7 +48,7 @@ class ModelPruner():
         elif self.pruning_method == 'by_channel':
             return self._prune_model_by_channel(prune_amount_list)
 
-    def get_fitness_score(self, model: VGG = None):
+    def get_fitness_score(self, model: VGG = None, verbose: bool = False):
         
         loss = None
         sparsity = None
@@ -62,9 +62,10 @@ class ModelPruner():
             ori_size = tp.utils.count_params(self.model)
             sparsity = tp.utils.count_params(model) / ori_size * 100
 
-        print(f'acc: {acc}')
-        print(f'loss: {loss}')
-        print(f'sparsity: {sparsity}')
+        if self.config['verbose'] or verbose:
+            print(f'acc: {acc}')
+            print(f'loss: {loss}')
+            print(f'sparsity: {sparsity}')
 
         alpha = self.config['loss_alpha']
         return -(alpha*acc + (1-alpha)*sparsity)
