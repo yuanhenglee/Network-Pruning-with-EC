@@ -9,23 +9,25 @@ import torch_pruning as tp
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split
-from torchvision.models import VGG
+from torchvision.models import VGG, ResNet
 from tqdm import tqdm
 
 from utils import measure_global_sparsity
 
 
 class ModelPruner():
-    def __init__(self, dataset: str='MNIST', pruning_method: str='by_parameter'):
+    def __init__(self, model_name: str='resnet18', dataset: str='MNIST', pruning_method: str='by_parameter'):
+        assert model_name in ['vgg11', 'resnet18']
         assert dataset in ['MNIST', 'CIFAR10']
         assert pruning_method in ['by_parameter', 'by_channel']
+        torch.cuda.empty_cache()
 
         self.config: dict = self._load_config(dataset)
-        self.model: VGG = self._load_model()
+        self.model: VGG = self._load_model(model_name)
         self.test_loader: DataLoader = self._get_test_loader()
         self.pruning_method:str = pruning_method
-        self.cached_model = self.model
-        self.prunable_layer_num = 10
+        self.cached_model = None
+        self.prunable_layer_num = 10 if model_name == 'vgg11' else 20
 
     @property
     def baseline(self)->dict:
@@ -35,7 +37,7 @@ class ModelPruner():
     def prune_model(self, prune_amount_list: list) -> VGG:
 
         assert(
-            len(prune_amount_list) == 10
+            len(prune_amount_list) == self.prunable_layer_num
         ), 'The total number of prunable layer is 10.'
         assert(
             all(prune_amount>=0 and prune_amount<1  for prune_amount in prune_amount_list)
@@ -55,21 +57,21 @@ class ModelPruner():
     
         loss, acc = self._validate(model)
         if self.pruning_method == 'by_parameter':
-            sparsity = measure_global_sparsity(model)[-1]
+            sparsity = measure_global_sparsity(model)[-1] * 100
         elif self.pruning_method == 'by_channel':
             ori_size = tp.utils.count_params(self.model)
-            sparsity = tp.utils.count_params(model) / ori_size
+            sparsity = tp.utils.count_params(model) / ori_size * 100
 
         print(f'acc: {acc}')
         print(f'loss: {loss}')
         print(f'sparsity: {sparsity}')
-        return loss + self.config['loss_alpha'] * sparsity
+
+        alpha = self.config['loss_alpha']
+        return -(alpha*acc + (1-alpha)*sparsity)
 
     def _prune_model_by_parameter(self, prune_amount_list: list) -> VGG:
         
         model = copy.deepcopy(self.model)
-
-        print('pruning...')
 
         cnt = 0
         for module_name, module in model.named_modules():
@@ -80,6 +82,9 @@ class ModelPruner():
                 prune.l1_unstructured(module, name="weight", amount=prune_amount_list[cnt])
                 cnt+=1
 
+        if self.cached_model is not None:
+            del self.cached_model
+            torch.cuda.empty_cache()
         self.cached_model = model
         return model
 
@@ -93,7 +98,6 @@ class ModelPruner():
                             self.config['image_size']).to(device=self.config['device']))
 
         cnt = 0
-        print('pruning...')
         for module_name, module in model.named_modules():
 
             if isinstance(module, torch.nn.Conv2d):
@@ -108,19 +112,22 @@ class ModelPruner():
                 cnt+=1
                 pruning_plan.exec()
 
+        if self.cached_model is not None:
+            del self.cached_model
+            torch.cuda.empty_cache()
         self.cached_model = model
         return model
 
     def _validate(self, model: VGG):
 
-        print('validating...')
         model.eval()
         valid_running_loss = 0.0
         valid_running_correct = 0
         counter = 0
         criterion = nn.CrossEntropyLoss()
         times = 0
-        progress = tqdm(total=10 if self.config['reduction'] else len(self.test_loader))
+        if self.config['verbose']:
+            progress = tqdm(total=10 if self.config['reduction'] else len(self.test_loader))
 
 
         with torch.no_grad():
@@ -140,7 +147,8 @@ class ModelPruner():
                 valid_running_correct += (preds == labels).sum().item()
                 
                 counter += 1
-                progress.update(1)
+                if self.config['verbose']:
+                    progress.update(1)
 
         # Loss and accuracy for the complete epoch.
         epoch_loss = valid_running_loss / counter
@@ -153,10 +161,15 @@ class ModelPruner():
     def _load_config(self, dataset):
         return getattr(importlib.import_module('config'), f'config_{dataset}'.lower())
 
-    def _load_model(self):
-        model = torchvision.models.vgg11()
-        model.classifier[6] = nn.Linear(in_features=4096, out_features=10)
-        model_path = f"{self.config['model_weights_root_path']}vgg11_{self.config['dataset']}.pt"
+    def _load_model(self, model_name:str):
+        if model_name == 'vgg11':
+            model: VGG = torchvision.models.vgg11()
+            model.classifier[6] = nn.Linear(in_features=4096, out_features=10)
+        elif model_name == 'resnet18':
+            model: ResNet = torchvision.models.resnet18()
+            model.fc = nn.Linear(in_features=model.fc.in_features, out_features=10)
+        
+        model_path = f"{self.config['model_weights_root_path']}{model_name}_{self.config['dataset']}.pt"
         print(f'Load model: {model_path}...')
         model.load_state_dict(torch.load(model_path, map_location=torch.device(self.config['device'])))
         model = model.to(self.config['device'])
