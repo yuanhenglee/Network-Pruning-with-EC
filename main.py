@@ -1,5 +1,6 @@
 import numpy as np
 import threading
+import argparse
 
 import torch
 from pymoo.algorithms.soo.nonconvex.cmaes import CMAES
@@ -23,12 +24,26 @@ class PruningProblem(ElementwiseProblem):
 
 if __name__ == '__main__':
 
-    # TODO: arg parse
-    model_name = 'resnet18'
-    dataset = 'CIFAR10'
-    pruning_method = 'by_parameter'
-    es_n_iter = 10
-    device = 'cuda'
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', type=str, default='resnet18')
+    parser.add_argument('--dataset', type=str, default='CIFAR10')
+    parser.add_argument('--pruning_method', type=str, default='by_parameter')
+    parser.add_argument('--es_n_iter', type=int, default=10)
+    parser.add_argument('--device', type=str, default='cuda')
+    args = parser.parse_args()
+
+    model_name = args.model_name
+    dataset = args.dataset
+    pruning_method = args.pruning_method
+    es_n_iter = args.es_n_iter
+    device = args.device
+
+    # model_name = 'resnet18'
+    # dataset = 'CIFAR10'
+    # pruning_method = 'by_parameter'
+    # es_n_iter = 10
+    # device = 'cuda'
 
 
     mp = ModelPruner(model_name, dataset, pruning_method)
@@ -40,7 +55,7 @@ if __name__ == '__main__':
                    algorithm,                
                    ('n_iter', es_n_iter),
                    seed=1,
-                   verbose=True)
+                   verbose=False)
 
     print(f"Best solution found: \nX = {res.X}\nF = {res.F}\nCV= {res.CV}")
     print(mp.get_fitness_score(verbose=True))
