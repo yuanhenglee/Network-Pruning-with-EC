@@ -5,15 +5,20 @@ import argparse
 
 
 
-#Hyperparameters could be change here:
+# Hyperparameters could be change here:
 
-HP_DECISION_INITVAL = 0.5   # Initial value for decision variable (array)
+# Self adaptation of step-size: 1/5 Rule
+# It runs for a certain amount of runs with fix stepsize, and determine if the 1/5 
+# results are better than the parent generation.
+# if yes, stepsize /= a
+# else stepsize *= a
+
+
+HP_DECISION_INITVAL = 0.5   # Initial value for decision variable
 HP_STEPSIZE_INITVAL = 0.1   # Initial value for stepsize
-HP_ITERATIONS = 5           # Run how many iterations/epoch
-HP_CHILD_LAMBDA = 2         # Run (1+child_lambda)-EC
-HP_TAU_PARAM = 0.1          # tau = HP_TAU_PARAM/((1/sqrt(N)),
-HP_ELPSLON_VALUE = 0.001    # The threshold of the step size, if stepsize < elpslon, stepsize=elpslon
-
+HP_GGENERATIONS = 10         # Run how many runs before updating the step size
+HP_A = 0.817                # a magical value to update step size, repordely 0.817 <= a <= 1
+HP_ITERATIONS = 15           # Run how many runs, the total pruning is HP_GGENERATIONS*HP_ITERATIONS
 
 
 if __name__ == '__main__':
@@ -40,59 +45,62 @@ if __name__ == '__main__':
         pruned_model = mp.prune_model(in_arr)
         return mp.get_fitness_score(pruned_model)
 
-    def One_step_single_pass(decision_len, deci_arr_in, stepsize_in, tau_in, elpslon_zero):
+    def One_fifth_single_pass(decision_len, deci_arr_in, stepsize_in):
         random_normal_i = np.random.normal(0, 1, size=(decision_len))
-        random_normal = np.random.normal(0, 1, size=(1))
+        # random_normal = np.random.normal(0, 1, size=(1))
         
         #store input variable
         deci_arr = np.copy(deci_arr_in)
         stepsize = np.copy(stepsize_in)
         
-        stepsize*=math.exp(tau_in*random_normal[0])
         for i in range(decision_len):
 
-            if(stepsize > elpslon_zero):
-                deci_arr[i] += stepsize*random_normal_i[i]
-            else:
-                deci_arr[i] += elpslon_zero*random_normal_i[i]
-
+            deci_arr[i] += stepsize*random_normal_i[i]
             if(deci_arr[i] <= 0.001):
                 deci_arr[i] = 0.001
             elif(deci_arr[i] >= 1):
                 deci_arr[i] = 0.999
 
-        return deci_arr, stepsize
+        return deci_arr
 
 
-    def ESXPlusX_OS(Decision_var_record, Stepsize_record, Best_score_record, Decision_arr_init, Stepsize_init
-                    , Target_run, child_lambda, hp_tau, hp_elpslon_zero):
+    def ESXPlusX_OneFifth(  Decision_var_record, Stepsize_record, Best_score_record, PS_record,
+                            Decision_arr_init, Stepsize_init, Ggenerations, hp_a_param,
+                            Target_run):
         train_runs = 0
         
         decision_var_arr = np.copy(Decision_arr_init)
         stepsize = Stepsize_init
-        best_score, best_acc = generator(decision_var_arr)
-
         
-        tau_in = hp_tau/((1/math.sqrt(len(Decision_arr_init))))
+        best_score, best_acc = generator(decision_var_arr)
 
         while(train_runs < Target_run):
             # print(f'Training epoch: {train_runs+1}/{Target_run}')
-            memorize_parent_decision_var_arr = np.copy(decision_var_arr)
-            memorize_parent_stepsize = stepsize
-    
-            for run in range(child_lambda):
-                tmp_decision_var_arr, tmp_stepsize = One_step_single_pass(len(Decision_arr_init),memorize_parent_decision_var_arr,memorize_parent_stepsize,tau_in,hp_elpslon_zero)
+            # memorize_parent_decision_var_arr = np.copy(decision_var_arr)
+            # memorize_parent_stepsize = stepsize
+
+            evolve_kids = 0
+            for run in range(Ggenerations):
+
+                tmp_decision_var_arr = One_fifth_single_pass(len(Decision_arr_init),decision_var_arr,stepsize)
                 tmp_score, tmp_acc = generator(tmp_decision_var_arr)
 
 
                 if(tmp_score < best_score):
+                    evolve_kids+=1
                     best_score = tmp_score
                     best_acc = tmp_acc
                     decision_var_arr = np.copy(tmp_decision_var_arr)
-                    stepsize = tmp_stepsize
+                    
+            if(evolve_kids > (Ggenerations/5)):
+                stepsize = stepsize/hp_a_param
+            elif(evolve_kids < (Ggenerations/5)):
+                stepsize = stepsize*hp_a_param
+            
             # Decision_var_record.append(decision_var_arr)
             # Stepsize_record.append(float(stepsize))
             # Best_score_record.append(best_score)
+            # PS_record.append(evolve_kids/Ggenerations)
 
             # print info
             print( f'{train_runs+1:5d} | {best_score:5.3f} | {stepsize:5.3f} | {best_acc:5.3f}' )
@@ -101,29 +109,24 @@ if __name__ == '__main__':
 
         return decision_var_arr, stepsize, best_score, best_acc
 
-    #auto generated parameter (Don't change)
+    #auto generated param(Don't change)
     Decision_arr = np.array([HP_DECISION_INITVAL for i in range(mp.prunable_layer_num)]) 
-
-    DV_record = [] #records the decision variable of each epoch
-    SZ_record = [] #records the step size of each epoch
-    BS_reocrd = [] #records the best solution of each run
+    DV_record = []
+    SZ_record = []
+    BS_reocrd = []
+    PS_record = []
 
     # print baseline performance
     print('baseline:', mp.baseline)
 
     # print title
-    print( f'{"Epoch":5s} | {"Score":5s} | {"Step":5s} | {"Acc":5s}')
+    print( f'{"Epoch":5s} | {"Score":7s} | {"Step":5s} | {"Acc":5s}')
 
-    #run EC algorithm
-    ans_decvar, ans_stepsize, ans_bestscore, best_acc = ESXPlusX_OS(Decision_var_record=DV_record,Stepsize_record=SZ_record,Best_score_record=BS_reocrd, 
+    ans_decvar, ans_stepsize, ans_bestscore, best_acc = ESXPlusX_OneFifth(Decision_var_record=DV_record,Stepsize_record=SZ_record,Best_score_record=BS_reocrd, PS_record=PS_record,
                 Decision_arr_init=Decision_arr,Stepsize_init=HP_STEPSIZE_INITVAL,
-                Target_run=HP_ITERATIONS,child_lambda=HP_CHILD_LAMBDA,hp_tau=HP_TAU_PARAM,hp_elpslon_zero=HP_ELPSLON_VALUE)
+                Ggenerations=HP_GGENERATIONS, hp_a_param=HP_A, Target_run=HP_ITERATIONS)
 
-    
+
     print(f"Best solution found: \nX = {ans_decvar}\nF = {ans_bestscore}")
 
     print(mp.get_fitness_score(mp.cached_model, verbose=True))
-
-    # print(DV_record)
-    # print(SZ_record)
-    # print(BS_reocrd)
