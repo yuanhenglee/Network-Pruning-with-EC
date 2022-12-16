@@ -19,23 +19,33 @@ class ModelPruner():
     def __init__(self, model_name: str='resnet18', dataset: str='MNIST', pruning_method: str='by_parameter'):
         assert model_name in ['vgg11', 'resnet18']
         assert dataset in ['MNIST', 'CIFAR10']
-        assert pruning_method in ['by_parameter', 'by_channel']
+        assert pruning_method in ['by_parameter', 'by_channel'] #unstructured pruning v.s. structured pruning 
+        torch.manual_seed(0)
         torch.cuda.empty_cache()
 
         self.config: dict = self._load_config(dataset)
-        self.model: VGG = self._load_model(model_name)
-        self.test_loader: DataLoader = self._get_test_loader()
+        self.model: nn.Module = self._load_model(model_name)
+        self.valid_loader: DataLoader = None
+        self.test_loader: DataLoader = None
+        self._init_valid_and_test_loader()
         self.pruning_method:str = pruning_method
         self.cached_model = None
         self.prunable_layer_num = 10 if model_name == 'vgg11' else 20
+
+        self.best_fitness_ever = 0
 
     @property
     def baseline(self)->dict:
         loss, acc = self._validate(self.model)
         return {'loss': loss, 'acc': acc}
 
-    def prune_model(self, prune_amount_list: list) -> VGG:
-
+    def prune_model(self, prune_amount_list: list) -> nn.Module:
+        """ Prune the original model according to the input list.
+        Args:
+            prune_amount_list (list): the amount of parameter want to be pruned for each layer.
+        Returns:
+            nn.Module: the pruned network.
+        """
         assert(
             len(prune_amount_list) == self.prunable_layer_num
         ), 'The total number of prunable layer is 10.'
@@ -48,14 +58,25 @@ class ModelPruner():
         elif self.pruning_method == 'by_channel':
             return self._prune_model_by_channel(prune_amount_list)
 
-    def get_fitness_score(self, model: VGG = None, verbose: bool = False):
-        
+    def get_fitness_score(self, model: nn.Module, verbose: bool=False, validation: bool=True,
+                          cached: bool=True) -> tuple[float, float]:
+        """ Get the fitness score (minimization).
+        fitness_score = -(alpha*acc + (1-alpha)*sparsity)
+        Args:
+            model (VGG, optional): the tested model.
+            verbose (bool, optional): verbose. Defaults to False.
+            validation (bool, optional): Set to be True during training, and to be False when predicting. Defaults to True.
+            cached (bool, optional): record the fitness and model if best. Defaults to True.
+        Returns:
+            tuple[float, float]: fitness_score, accuracy.
+        """
         loss = None
         sparsity = None
         if model == None:
             model = self.cached_model
     
-        loss, acc = self._validate(model)
+        loss, acc = self._validate(model, validation)
+
         if self.pruning_method == 'by_parameter':
             sparsity = measure_global_sparsity(model)[-1] * 100
         elif self.pruning_method == 'by_channel':
@@ -68,7 +89,14 @@ class ModelPruner():
             print(f'sparsity: {sparsity}')
 
         alpha = self.config['loss_alpha']
-        return -(alpha*acc + (1-alpha)*sparsity)
+        fitness_score = -(alpha*acc + (1-alpha)*sparsity)
+
+        if cached and fitness_score < self.best_fitness_ever:
+            self.best_fitness_ever = fitness_score
+            del self.cached_model
+            self.cached_model = model
+
+        return fitness_score, acc
 
     def _prune_model_by_parameter(self, prune_amount_list: list) -> VGG:
         
@@ -83,10 +111,6 @@ class ModelPruner():
                 prune.l1_unstructured(module, name="weight", amount=prune_amount_list[cnt])
                 cnt+=1
 
-        if self.cached_model is not None:
-            del self.cached_model
-            torch.cuda.empty_cache()
-        self.cached_model = model
         return model
 
 
@@ -113,13 +137,9 @@ class ModelPruner():
                 cnt+=1
                 pruning_plan.exec()
 
-        if self.cached_model is not None:
-            del self.cached_model
-            torch.cuda.empty_cache()
-        self.cached_model = model
         return model
 
-    def _validate(self, model: VGG):
+    def _validate(self, model: VGG, validation: bool=True):
 
         model.eval()
         valid_running_loss = 0.0
@@ -127,12 +147,12 @@ class ModelPruner():
         counter = 0
         criterion = nn.CrossEntropyLoss()
         times = 0
+        data_loader: DataLoader = self.test_loader if validation else self.valid_loader
         if self.config['verbose']:
             progress = tqdm(total=10 if self.config['reduction'] else len(self.test_loader))
 
-
         with torch.no_grad():
-            for data in self.test_loader:
+            for data in data_loader:
                 if self.config['reduction'] and counter==10:
                     break
                 
@@ -176,7 +196,7 @@ class ModelPruner():
         model = model.to(self.config['device'])
         return model
 
-    def _get_test_loader(self):
+    def _init_valid_and_test_loader(self):
         if self.config['dataset'] == 'CIFAR10':
             transform = transforms.Compose([
                 transforms.Resize((self.config['image_size'],self.config['image_size'])),
@@ -206,4 +226,10 @@ class ModelPruner():
                     os.makedirs(self.config['dataset_root_path'])
                 test_data = torchvision.datasets.MNIST(root = self.config['dataset_root_path'], train=False, transform=transform, download=True)
 
-        return DataLoader(dataset=test_data, batch_size=self.config['batch_size'], shuffle=True, num_workers = 1)
+        valid_data_size = int(len(test_data) * 0.5)
+        test_data_size = len(test_data) - valid_data_size
+
+        valid_data, test_data = random_split(test_data, [valid_data_size, test_data_size])
+        
+        self.valid_loader = DataLoader(dataset=valid_data, batch_size=self.config['batch_size'], shuffle=True, num_workers = 1)
+        self.test_loader = DataLoader(dataset=test_data, batch_size=self.config['batch_size'], shuffle=True, num_workers = 1)

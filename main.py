@@ -1,13 +1,14 @@
-import numpy as np
-import threading
 import argparse
+import threading
 
+import numpy as np
 import torch
 from pymoo.algorithms.soo.nonconvex.cmaes import CMAES
-from pymoo.optimize import minimize
 from pymoo.core.problem import ElementwiseProblem
+from pymoo.optimize import minimize
 
 from prune import ModelPruner
+
 
 class PruningProblem(ElementwiseProblem):
 
@@ -17,10 +18,9 @@ class PruningProblem(ElementwiseProblem):
         self._mp = mp
 
     def _evaluate(self, x, out, *args, **kwargs):
-        self._mp.prune_model(x)
-        f = self._mp.get_fitness_score()
+        pruned_model = self._mp.prune_model(x)
+        f, _ = self._mp.get_fitness_score(pruned_model)
         out["F"] = f
-
 
 if __name__ == '__main__':
 
@@ -47,6 +47,7 @@ if __name__ == '__main__':
 
 
     mp = ModelPruner(model_name, dataset, pruning_method)
+    print('baseline:', mp.baseline)
 
     problem = PruningProblem(mp)
     print('baseline:', mp.baseline)
@@ -55,10 +56,11 @@ if __name__ == '__main__':
                    algorithm,                
                    ('n_iter', es_n_iter),
                    seed=1,
-                   verbose=False)
+                   verbose=True)
 
     print(f"Best solution found: \nX = {res.X}\nF = {res.F}\nCV= {res.CV}")
-    print(mp.get_fitness_score(verbose=True))
+    # print(mp.get_fitness_score(verbose=True))
+    print(mp.get_fitness_score(mp.cached_model, verbose=True))
 
     pruned_model_saving_path = f"{mp.config['model_weights_root_path']}pruned/pruned_{model_name}_{dataset}.model"
     torch.save(mp.cached_model, pruned_model_saving_path)
