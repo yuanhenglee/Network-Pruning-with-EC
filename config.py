@@ -9,7 +9,7 @@ config_cifar10 = {
     'batch_size': 64,
     'random_seed': 42,
     'image_size': 64,
-    'loss_alpha': 0.5,
+    'loss_alpha': 0.8,
     'reduction': True
 }
 
