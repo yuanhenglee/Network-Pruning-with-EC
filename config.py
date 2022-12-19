@@ -9,7 +9,7 @@ config_cifar10 = {
     'batch_size': 64,
     'random_seed': 42,
     'image_size': 64,
-    'loss_alpha': 0.8,
+    'loss_alpha': 0.5,
     'reduction': True
 }
 
@@ -17,7 +17,7 @@ config_mnist = {
     'dataset': 'MNIST',
     'dataset_root_path': './dataset/',
     'model_weights_root_path': './model_weights/',
-    'device': 'cuda',
+    'device': 'cpu',
     'n_epochs': 2,
     'lr': 0.002,
     'verbose': False,

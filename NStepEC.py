@@ -6,7 +6,7 @@ import argparse
 
 #Hyperparameters could be change here:
 
-HP_DECISION_INITVAL = 0.5   # Initial value for decision variable (array)
+# HP_DECISION_INITVAL = 0.01   # Initial value for decision variable (array)
 HP_STEPSIZE_INITVAL = 0.1   # Initial value for stepsize (array)
 HP_ITERATIONS = 5           # Run how many iterations/epoch
 HP_CHILD_LAMBDA = 2         # Run (1+child_lambda)-EC
@@ -30,6 +30,11 @@ if __name__ == '__main__':
     pruning_method = args.pruning_method
     HP_ITERATIONS = args.es_n_iter
     device = args.device
+
+    if pruning_method == 'by_parameter':
+        HP_DECISION_INITVAL = 0.5
+    else:
+        HP_DECISION_INITVAL = 0.01
 
     mp = ModelPruner(model_name, dataset, pruning_method)
 
@@ -108,6 +113,18 @@ if __name__ == '__main__':
     Decision_arr = np.array([HP_DECISION_INITVAL for i in range(mp.prunable_layer_num)]) 
     Stepsize_arr = np.array([HP_STEPSIZE_INITVAL for i in range(mp.prunable_layer_num)]) 
 
+    # print parameters
+    print('model:', model_name)
+    print('dataset:', dataset)
+    print('pruning method:', mp.pruning_method)
+    print('device:', device)
+    print('iterations:', HP_ITERATIONS)
+    print('child_lambda:', HP_CHILD_LAMBDA)
+    print('tau:', HP_TAU_PARAM)
+    print('tau_prum:', HP_TAU_PRUM_PARAM)
+    print('elpslon:', HP_ELPSLON_VALUE)
+    print('stepsize_init:', HP_STEPSIZE_INITVAL)
+    print('decision_init:', HP_DECISION_INITVAL)
 
     DV_record = [] #records the decision variable of each epoch
     SZ_record = [] #records the step size of each epoch

@@ -48,7 +48,7 @@ class ModelPruner():
         """
         assert(
             len(prune_amount_list) == self.prunable_layer_num
-        ), 'The total number of prunable layer is 10.'
+        ), f'The total number of prunable layer is {self.prunable_layer_num}.'
         assert(
             all(prune_amount>=0 and prune_amount<1  for prune_amount in prune_amount_list)
         ), 'the prune amount should be in the range of [0,1.0)'
@@ -81,7 +81,7 @@ class ModelPruner():
             sparsity = measure_global_sparsity(model)[-1] * 100
         elif self.pruning_method == 'by_channel':
             ori_size = tp.utils.count_params(self.model)
-            sparsity = tp.utils.count_params(model) / ori_size * 100
+            sparsity = (1. - tp.utils.count_params(model) / ori_size) * 100
 
         if self.config['verbose'] or verbose:
             print(f'acc: {acc}')
@@ -117,6 +117,7 @@ class ModelPruner():
     def _prune_model_by_channel(self, prune_amount_list: list) -> VGG:
 
         model = copy.deepcopy(self.model)
+
         strategy = tp.strategy.L1Strategy()
         DG = tp.DependencyGraph()
         DG.build_dependency(model, example_inputs=torch.randn(1,3,self.config['image_size'],
@@ -124,16 +125,15 @@ class ModelPruner():
 
         cnt = 0
         for module_name, module in model.named_modules():
-
             if isinstance(module, torch.nn.Conv2d):
                 pruning_idxs = strategy(module.weight, amount=prune_amount_list[cnt])
-                pruning_plan = DG.get_pruning_plan( module, tp.prune_conv_out_channel, idxs=pruning_idxs)
+                pruning_plan = DG.get_pruning_plan(module, tp.prune_conv_out_channel, idxs=pruning_idxs)
                 cnt+=1
                 pruning_plan.exec()
 
             elif isinstance(module, torch.nn.Linear) and module.out_features != 10:
                 pruning_idxs = strategy(module.weight, amount=prune_amount_list[cnt])
-                pruning_plan = DG.get_pruning_plan( module, tp.prune_linear_out_channel, idxs=pruning_idxs)
+                pruning_plan = DG.get_pruning_plan(module, tp.prune_linear_out_channel, idxs=pruning_idxs)
                 cnt+=1
                 pruning_plan.exec()
 
@@ -146,7 +146,6 @@ class ModelPruner():
         valid_running_correct = 0
         counter = 0
         criterion = nn.CrossEntropyLoss()
-        times = 0
         data_loader: DataLoader = self.test_loader if validation else self.valid_loader
         if self.config['verbose']:
             progress = tqdm(total=10 if self.config['reduction'] else len(self.test_loader))

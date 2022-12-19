@@ -14,7 +14,7 @@ import argparse
 # else stepsize *= a
 
 
-HP_DECISION_INITVAL = 0.5   # Initial value for decision variable
+# HP_DECISION_INITVAL = 0.01   # Initial value for decision variable
 HP_STEPSIZE_INITVAL = 0.1   # Initial value for stepsize
 HP_GGENERATIONS = 10         # Run how many runs before updating the step size
 HP_A = 0.817                # a magical value to update step size, repordely 0.817 <= a <= 1
@@ -37,6 +37,11 @@ if __name__ == '__main__':
     pruning_method = args.pruning_method
     HP_ITERATIONS = args.es_n_iter
     device = args.device
+
+    if pruning_method == 'by_parameter':
+        HP_DECISION_INITVAL = 0.5
+    else:
+        HP_DECISION_INITVAL = 0.01
 
     mp = ModelPruner(model_name, dataset, pruning_method)
 
@@ -111,6 +116,19 @@ if __name__ == '__main__':
 
     #auto generated param(Don't change)
     Decision_arr = np.array([HP_DECISION_INITVAL for i in range(mp.prunable_layer_num)]) 
+
+    # print parameters
+    print( 'model', model_name)
+    print( 'dataset', dataset)
+    print( 'pruning_method', pruning_method)
+    print( 'device', device)   
+    print('iterations:', HP_ITERATIONS)
+    print('generations:', HP_GGENERATIONS)
+    print('a_param:', HP_A)
+    print('stepsize_init:', HP_STEPSIZE_INITVAL)
+    print('decision_init:', HP_DECISION_INITVAL)
+
+
     DV_record = []
     SZ_record = []
     BS_reocrd = []
